@@ -9,6 +9,7 @@ class Tetresse {
      */
     constructor(args) {
         this.settings = {
+            replay: args.replay == null ? false : args.replay,
             game: {
                 board: {
                     shownRows: 20,
@@ -16,12 +17,16 @@ class Tetresse {
                     cols: 10
                 },
                 display: {
-                    maxWidth: .3,
-                    maxHeight: .8,
+                    canvas: args.canvas,
+                    x: args.x == null ? .3 : args.x, // x location as percentage of canvas
+                    y: args.y == null ? 0 : args.y,
+                    width: args.w == null ? 1 : args.w, // max width as percentage of canvas
+                    height: args.h == null ? 1 : args.h, 
                     nextPieces: 5,
                 },
                 play: {
                     gravity: {
+                        enabled: true,
                         speed: 1000, // in ms
                         stall: 15, // number of times you stall
                     }
@@ -38,22 +43,23 @@ class Tetresse {
 
         // env vars
         Tetresse.envSetup();
-        window.tetresse.games[window.tetresse.games.length] = this;
+        this.id = tetresse.games.length;
+        window.tetresse.games[this.id] = this;
 
         // listeners
         this.listeners = this.setupListeners();
 
         // display
+        Tetresse.setupDisplay();
         this.board = this.createBoard();
-        this.display = args == null || args.display == null ? this.createDefaultDisplay() : args.display;
+        this.display = this.createDisplay();
         tetresse.listeners.resize.resume();
         this.initializeDisplay();
 
         // piece
         this.piece = this.setupPiece();
         this.initializeLineClear();
-        this.piece.gravity.setState(true); // initialize gravity
-
+        
         // peripherals
 
         // actions
@@ -61,9 +67,11 @@ class Tetresse {
         this.setupActions();
 
         // keybinds
-        Tetresse.setupBinds();
-        this.initializeBinds();
-        tetresse.listeners.binds.resume();
+        if (!this.settings.replay) {
+            Tetresse.setupBinds();
+            this.initializeBinds();
+            tetresse.listeners.binds.resume();
+        }
 
         this.listeners.execute({event: "startGame"});
         // start clock
@@ -226,7 +234,7 @@ class Tetresse {
             args.game.piece.rotate(-1);
         }, args: {game: this}});
         this.actions.add({func: function(args) {
-            console.log("hold");
+            // console.log("hold");
             args.game.piece.hold();
         }, args: {game: this}});
         this.actions.add({func: function(args) {
@@ -469,7 +477,8 @@ class Tetresse {
                         this.func = {
                             f: function(args) {
                                 if (args.game.piece.gravity.func == null) return;
-                                if (!args.game.piece.drop()) args.game.piece.place();
+                                if (args.game.piece.cur.p != null && !args.game.piece.drop()) 
+                                    if (!args.game.settings.replay) args.game.piece.place();
                             },
                             args: {
                                 game: this.game,
@@ -704,7 +713,9 @@ class Tetresse {
         };
         this.listeners.add({event: "startGame", args: {game: this},
             func: function(args) {
-                args.game.piece.next();
+                if (!args.game.settings.replay)
+                    args.game.piece.next();
+                args.game.piece.gravity.setState(args.game.settings.game.play.gravity.enabled);
             }});
         return piece;
     }
@@ -718,35 +729,6 @@ class Tetresse {
             }
         }
         return board;
-    }
-
-    /**
-     * sets up a canvas and basic display: just one board being controlled by user
-     */
-    createDefaultDisplay() {
-        Tetresse.setupResize();
-        var c = document.createElement("canvas");
-        document.body.appendChild(c);
-        c.style = "background: black;display:block;margin:auto;";
-        c.id = "tetresse-game-area-" + (tetresse.listeners.resize.list.length);
-
-        var l = tetresse.listeners.resize.list;
-        l[l.length] = {func: function(c) {
-            var winW = window.innerWidth;
-            var winH = window.innerHeight;
-            var boardW = .3;
-            var wPercent = (3 / 2) * boardW; // expand for peripherals
-            var hPercent = .8;
-            var canvasW = winW * wPercent;
-            var canvasH = winH * hPercent;
-            if (canvasH < canvasW * (4 / 3)) // if the board's too tall
-                canvasW = canvasH * (3 / 4);
-            canvasH = (4 / 3) * canvasW;
-            c.width = canvasW;
-            c.height = canvasH;
-        }, args: c};
-        l[l.length - 1].func(c);
-        return this.createDisplay(c);
     }
 
     /**
@@ -765,49 +747,40 @@ class Tetresse {
         // hd
         this.listeners.add({event: "harddrop", func: this.display.update, args: {type: "boardPiece", show: false, display: this.display}});
         this.listeners.add({event: "place", func: this.display.update, args: {type: "boardPiece", display: this.display}});
-        // hold
-        this.listeners.add({event: "hold", func: this.display.update, args: {type: "boardPiece", show: false, display: this.display}});
-        this.listeners.add({event: "held", func: this.display.update, args: {type: "holdPiece", display: this.display}});
-        // up next
-        this.listeners.add({event: "next", func: this.display.update, args: {type: "next", display: this.display, border: false}});
+        if (!this.settings.replay) {
+            // hold
+            this.listeners.add({event: "hold", func: this.display.update, args: {type: "boardPiece", show: false, display: this.display}});
+            this.listeners.add({event: "held", func: this.display.update, args: {type: "holdPiece", display: this.display}});
+            // up next
+            this.listeners.add({event: "next", func: this.display.update, args: {type: "next", display: this.display, border: false}});
+        }
         // spawn
         this.listeners.add({event: "spawned", func: this.display.update, args: {type: "boardPiece", display: this.display}});
     }
 
     /**
      * canvas - canvas to draw on.
-     * x, y - coordinates for drawing the top left corner of the board, >= 1 for percentage.
-     * w, h - width and height, >= 1 for percentage.
+     * lx, ly - percentage of canvas coordinates for drawing the top left corner of the board
+     * mw, mh - maximum width and height percentage with respect to canvas
      * note: x, y, w, h are all set to percentages based on canvas size if not already percentages.
      * note: x, y, w, h by default are set to fill canvas with peripherals on left and right
      */
-    createDisplay(canvas, x, y, w, h) {
-        if (w == null)
-            w = canvas.width * 2 / 3;
-        if (w > 1)
-            w /= canvas.width;
-        if (h == null)
-            h = (canvas.height - 2 * canvas.width * w / 40) / canvas.height;
-        if (h > 1)
-            h /= canvas.height;
-        if (x == null)
-            x = w * canvas.width / 20 + w * canvas.width / 5;
-        if (x > 1)
-            x /= canvas.width;
-        if (y == null)
-            y = w * canvas.width / 40;
-        if (y > 1)
-            y /= canvas.height;
-
+    createDisplay() {
+        var td = tetresse.display;
+        var ds = this.settings.game.display;
         Tetresse.setupResize();
         var display = {
             id: -1, // index in tetresse.listeners.resize.list
-            canvas: canvas, // canvas to draw on
-            ctx: canvas.getContext("2d"),
-            x: x, // percentage of canvas width
-            y: y, // percentage of canvas height
-            w: w, // ...
-            h: h, // ...
+            ctx: td.canvas.getContext("2d"),
+            locX: ds.x,
+            locY: ds.y,
+            x: null, // percentage of canvas width to top right of board
+            y: null, // ...
+            maxW: ds.width, // max width of the board in percentage with respect to canvas
+            maxH: ds.height, // ...
+            whRatio: 3 / 2,
+            w: null, // width of the board
+            h: null, // ...
             paused: false, // whether or not to draw stuff
             game: this,
             /**
@@ -822,16 +795,22 @@ class Tetresse {
              * }
              */
             update(args) {
-                if (args == null)
-                    return;
-                if (args.display == null)
-                    args.display = this;
+                if (args == null) args = {type: "refresh"};
+                if (args.length != null) args = {type: args};
+                if (args.display == null) args.display = this;
                 args.display.methods[args.type](args);
             },
             methods: { // Should only be called from update method.
-                refresh(args) { // redraws this entire game
+                refresh(args) { // redraws this entire game, use when w, h, x, or y need to be updated
+                    var td = tetresse.display.canvas
+                    var xy = {x: td.width * args.display.locX, y: td.height * args.display.locY};
+                    var wh = tetresse.utils.displaySize(td.width, td.height, args.display.maxW, args.display.maxH, args.display.whRatio);
+                    var t = wh.w / 15;
+                    args.display.x = xy.x + (t / 2 + 2 * t); args.display.y = xy.y + t / 4;
+                    args.display.w = wh.w * (2 / 3); args.display.h = wh.h - (t / 2);
                     this.board(args);
-                    this.peripherals(args);
+                    if (!args.display.game.settings.replay)
+                        this.peripherals(args);
                 },
                 board(args) { // redraws the board
                     this.boardContent(args);
@@ -844,17 +823,17 @@ class Tetresse {
                     var mc = args.display.game.settings.game.board.cols;
                     var hr = d.game.board.length - mr;
                     var hc = d.game.board[0].length - mc;
-                    var cx = d.x * d.canvas.width;
-                    var cy = d.y * d.canvas.height;
-                    var cw = d.w * d.canvas.width;
-                    var ch = d.h * d.canvas.height;
+                    var cx = d.x;
+                    var cy = d.y;
+                    var cw = d.w;
+                    var ch = d.h;
                     for (var r = (args.r1 == null ? 0 : args.r1 - hr); r < (args.r2 == null ? mr : args.r2 - hr); r++) {
                         for (var c = 0; c < mc; c++) {
-                            d.ctx.beginPath();
-                            d.ctx.rect(cx + (cw / mc) * c, cy + (ch / mr) * r, cw / mc, ch / mr);
-                            d.ctx.lineWidth = 2;
-                            d.ctx.strokeStyle = "grey";
-                            d.ctx.stroke();
+                            // d.ctx.beginPath();
+                            // d.ctx.rect(cx + (cw / mc) * c, cy + (ch / mr) * r, cw / mc, ch / mr);
+                            // d.ctx.lineWidth = 2;
+                            // d.ctx.strokeStyle = "grey";
+                            // d.ctx.stroke();
 
                             args.r = r;
                             args.c = c;
@@ -865,8 +844,8 @@ class Tetresse {
                 },
                 boardBorder(args) { // redraws the board's border. note: erases piece
                     var d = args.display;
-                    var v = {x: d.x * d.canvas.width, y: d.y * d.canvas.height, w: d.w * d.canvas.width, h: d.h * d.canvas.height};
-                    var offset = d.w * d.canvas.width / 40;
+                    var v = {x: d.x, y: d.y, w: d.w, h: d.h};
+                    var offset = d.w / 40;
                     // if the display doesn't update correctly (some parts update before others) change this to rect and implement an extra function at the end of tetresse.listeners.resize.list
                     d.ctx.beginPath();
                     d.ctx.rect(v.x - offset, v.y - offset, v.w + 2 * offset, v.h + 2 * offset);
@@ -876,11 +855,12 @@ class Tetresse {
                 },
                 boardPiece(args) { // redraws the board's piece, uses args.show
                     var d = args.display;
-                    if (d.game.piece == null)
-                        return;
+                    if (d.game.piece == null) return;
+                    var p = d.game.piece.cur;
+                    if (p == null || p.p == null) return;
                     this.boardPieceGhost(args);
                     args.show = args.show == null ? true : args.show;
-                    var p = d.game.piece.cur;
+                    if (p == null) return;
                     for (var r = 0; r < p.arr.length; r++)
                         for (var c = 0; c < p.arr.length; c++)
                             if (p.arr[r][c] != 0) {
@@ -916,9 +896,9 @@ class Tetresse {
                 },
                 holdBorder(args) {
                     var d = args.display;
-                    var v = {x: d.x * d.canvas.width, y: d.y * d.canvas.height, w: d.w * d.canvas.width, h: d.h * d.canvas.height};
+                    var v = {x: d.x, y: d.y, w: d.w, h: d.h};
                     v = {x: v.x - v.w / 40 - v.w / 5, y: v.y + 2.5 * v.h / 20, w: v.w / 5, h: v.h / 10};
-                    var offset = d.w * d.canvas.width / 40;
+                    var offset = d.w / 40;
                     d.ctx.beginPath();
                     d.ctx.rect(v.x - offset, v.y - offset, v.w + 2 * offset, v.h + 2 * offset);
                     d.ctx.rect(v.x, v.y, v.w, v.h);
@@ -928,7 +908,7 @@ class Tetresse {
                 holdPiece(args) {
                     var d = args.display;
                     // background
-                    var v = {x: d.x * d.canvas.width, y: d.y * d.canvas.height, w: d.w * d.canvas.width, h: d.h * d.canvas.height};
+                    var v = {x: d.x, y: d.y, w: d.w, h: d.h};
                     v = {x: v.x - v.w / 40 - v.w / 5, y: v.y + 2.5 * v.h / 20, w: v.w / 5, h: v.h / 10};
                     d.ctx.beginPath();
                     d.ctx.rect(v.x, v.y, v.w, v.h);
@@ -970,11 +950,11 @@ class Tetresse {
                 nextPiece(args) { // args.num is the piece to be updated, starting at 0
                     var d = args.display;
                     // background
-                    var v = {x: d.x * d.canvas.width, y: d.y * d.canvas.height, 
-                        w: d.w * d.canvas.width, h: d.h * d.canvas.height};
+                    var v = {x: d.x, y: d.y, 
+                        w: d.w, h: d.h};
                     v = {x: v.x + v.w / 40 + v.w, y: v.y + 2.5 * v.h / 20, w: v.w / 5, 
                         h: v.w / 5};
-                    var offset = d.w * d.canvas.width / 80;
+                    var offset = d.w / 80;
                     v.y += offset * (args.num) + offset * (args.num == 0 ? 0 : 1) + v.h * args.num;
 
                     d.ctx.beginPath();
@@ -1002,15 +982,15 @@ class Tetresse {
                 },
                 nextBorder(args) { // includes the divider between next[0] and next[1]
                     var d = args.display;
-                    var v = {x: d.x * d.canvas.width, y: d.y * d.canvas.height, w: d.w * d.canvas.width, h: d.h * d.canvas.height};
+                    var v = {x: d.x, y: d.y, w: d.w, h: d.h};
                     v = {x: v.x + v.w / 40 + v.w, y: v.y + 2.5 * v.h / 20, w: v.w / 5, h: (v.h / 10 + v.h / 80) * args.display.game.settings.game.display.nextPieces - v.h / 80};
-                    var offset = d.w * d.canvas.width / 40;
+                    var offset = d.w / 40;
                     d.ctx.beginPath();
                     d.ctx.rect(v.x - offset, v.y - offset, v.w + 2 * offset, v.h + 2 * offset);
                     d.ctx.rect(v.x, v.y, v.w, v.h);
                     d.ctx.fillStyle = "grey";
                     d.ctx.fill("evenodd");
-                    v.h = d.h * d.canvas.height / 10;
+                    v.h = d.h / 10;
                     d.ctx.beginPath();
                     d.ctx.rect(v.x - offset, v.y - offset, v.w + 2 * offset, v.h + 2 * offset);
                     d.ctx.rect(v.x, v.y, v.w, v.h);
@@ -1023,7 +1003,7 @@ class Tetresse {
                     var d = args.display;
                     args.content = args.content == null || args.content == "" ? "null" : args.content;
                     var c = {i: "hsl(196, 89%, 57%)", j: "hsl(231, 69%, 45%)", l: "hsl(24, 98%, 44%)", o: "hsl(42, 97%, 45%)", s: "hsl(92, 91%, 37%)", t: "hsl(314, 63%, 41%)", z: "hsl(348, 86%, 45%)", null: "black", ghost: "#484848"};
-                    var v = {x: d.x * d.canvas.width, y: d.y * d.canvas.height, w: d.w * d.canvas.width, h: d.h * d.canvas.height};
+                    var v = {x: d.x, y: d.y, w: d.w, h: d.h};
                     v = {x: v.x + args.c * v.w / 10, y: v.y + args.r * v.h / 20, w: v.w / 10, h: v.h / 20};
                     d.ctx.beginPath();
                     d.ctx.rect(v.x, v.y, v.w, v.h);
@@ -1032,15 +1012,18 @@ class Tetresse {
                     d.ctx.lineWidth = 1;
                     d.ctx.fill();
                     d.ctx.stroke();
+                    if (args.content == "null") {
+                        d.ctx.beginPath();
+                        d.ctx.rect(v.x, v.y, v.w, v.h);
+                        d.ctx.lineWidth = 1;
+                        d.ctx.strokeStyle = "grey";
+                        d.ctx.stroke();
+                    }
                 }
             }
         };
-        var l = tetresse.listeners.resize.list;
-        var a = {type: "refresh", display: display};
-        l[l.length] = {func: display.update, args: a};
-        display.update(a);
-        display.id = l.length;
-
+        display.update({type: "refresh", display: display});
+        tetresse.display.add(this.id, display)
         return display;
     }
 
@@ -1137,41 +1120,89 @@ class Tetresse {
                     },
                     removeEvent(element, eventName, callback) { // remove listener TODO add support for other browsers
                         element.removeEventListener(eventName, callback);
+                    },
+                    displaySize(availWidth, availHeight, maxWidth, maxHeight, ratio) { // calculates {w, h} so that ratio (h / w) is preserved
+                        var width = availWidth * maxWidth;
+                        if (maxHeight * availHeight < width * ratio)    
+                            width = availHeight * maxHeight * (1 / ratio);
+                        return {w: width, h: width * ratio};
                     }
                 },
                 listeners: {},
             };
     }
 
+    // Creates canvas
+    static setupDisplay() {
+        if (tetresse == null) Tetresse.envSetup();
+        if (tetresse.display != null) return;
+        if (tetresse.listeners.resize == null) Tetresse.setupResize();
+        var c = document.createElement("canvas");
+        document.body.appendChild(c);
+        c.style = "background: black;display:block;margin:auto;";
+        c.id = "tetresse-game-area"; 
+        tetresse.display = {
+            canvas: c,
+            x: 0, // in percent
+            y: 0, // in percent TODO make this a part of settings
+            mw: 1, // max width constraint
+            mh: 1, // max height constraint
+            ratio: 1080 / 1920,
+            children: {}, // full of display objects in games
+            update() {
+                var t = tetresse.display
+                var s = tetresse.utils.displaySize(window.innerWidth, window.innerHeight, t.mw, t.mh, t.ratio);
+                var c = tetresse.display.canvas;
+                c.width = s.w;
+                c.height = s.h;
+                for (var v in tetresse.display.children) {
+                    tetresse.display.children[v].update("refresh");
+                }
+            },
+            add(id, display) {
+                tetresse.display.children[id] = display;
+            }
+        };
+        tetresse.listeners.resize.add("display", tetresse.display.update);
+        tetresse.display.update();
+    }
+
     // Creates tetresse resize variable
     static setupResize() {
-        if (tetresse == null)
-            envSetup();
-        if (tetresse.listeners.resize != null)
-            return;
+        if (tetresse == null) Tetresse.envSetup();
+        if (tetresse.listeners.resize != null) return;
         tetresse.listeners.resize = {
             active: false, 
-            list: [],
+            onResize: {}, // [label]: func, args
             // Pause drawing the screen
             pause() {
                 if (tetresse.listeners.resize.active) {
                     tetresse.listeners.resize.active = false;
-                    window.removeEventListener("resize", tetresse.listeners.resize.func);
+                    tetresse.utils.removeEvent(window, "resize", tetresse.listeners.resize.func);
                 }
             },
             // Resume drawing the screen
             resume() {
                 if (!tetresse.listeners.resize.active) {
                     tetresse.listeners.resize.active = true;
-                    window.addEventListener("resize", tetresse.listeners.resize.func);
+                    tetresse.utils.addEvent(window, "resize", tetresse.listeners.resize.func);
                 }
+            },
+            add(label, func, args) {
+                var onResize = tetresse.listeners.resize.onResize;
+                if (onResize[label] != null) console.log("overwriting resize"); // TODO reportError
+                onResize[label] = {func: func, args: args};
+            },
+            remove(label) {
+                var onResize = tetresse.listeners.resize.onResize;
+                if (onResize[label] == null) return false;
+                return delete onResize[label];
             },
             // Executes func function in every element with specified args
             func() {
-                var l = tetresse.listeners.resize.list;
-                for (var i = 0; i < l.length; i++) {
-                    l[i].func(l[i].args);
-                }
+                var r = tetresse.listeners.resize.onResize;
+                for (var v in r)
+                    r[v].func(r[v].args);
             }
         };
     }
@@ -1400,7 +1431,7 @@ class Tetresse {
         if (tetresse == null) Tetresse.envSetup();
         if (tetresse.listeners.blur != null) return;
         tetresse.listeners.blur = {
-            
+
         };
 
     }

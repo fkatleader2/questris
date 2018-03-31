@@ -1,5 +1,17 @@
 <head>
     <title>Tetresse example</title>
-    <script src="tetresse.js"></script>    
+    <script src="tetresse.js"></script>
+    <script>
+        function setup() {
+            new Tetresse({replay: false, x: .005, y: .05, w: .4, h: .9});
+            new Tetresse({replay: true, x: .4, y: .05, w: .5, h: .4});
+            new Tetresse({replay: true, x: .6, y: .05, w: .5, h: .4});
+            new Tetresse({replay: true, x: .8, y: .05, w: .5, h: .4});
+            new Tetresse({replay: true, x: .5, y: .55, w: .4, h: .4});
+            new Tetresse({replay: true, x: .7, y: .55, w: .4, h: .4});
+            // new Tetresse({});
+        }
+    </script> 
 </head>
-<body onload="new Tetresse()" style="margin:0px"></body>
+<body onload="setup()" style="margin:0px">
+</body>

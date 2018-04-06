@@ -1,4 +1,3 @@
-
 /**
  * TODO: make display use images
  */
@@ -29,7 +28,8 @@ class Tetresse {
                         enabled: true,
                         speed: 1000, // in ms
                         stall: 15, // number of times you stall
-                    }
+                    },
+                    LCDelay: 500 // line clear delay (in ms)
                 }
             },
             user: {
@@ -37,7 +37,10 @@ class Tetresse {
                     ARR: 16, // auto repeat rate in ms
                     DAS: 150, // delayed auto shift in ms
                     SDD: 25, // soft drop delay in ms
-                } 
+                }
+            },
+            modules: {
+
             }
         };
 
@@ -73,15 +76,28 @@ class Tetresse {
             tetresse.listeners.binds.resume();
         }
 
-        this.listeners.execute({event: "startGame"});
+        for (var v in tetresse.modules) // TODO allow this setting to be changed (setup earlier in construction)
+            tetresse.modules[v].setup(this);
+
+        this.listeners.execute("startGame");
         // start clock
         // this.listeners.clock.resume();
     }
 
+    initializeModules(args) {
+        if (args.modules != null) {
+            this.settings.modules = {};
+            for (var i = 0 ; i < args.modules.length; i++) {
+                var v = exports[args.modules[i]];
+                v.setup(this);
+                this.settings.modules[args.modules[i]] = v;
+            }
+        }
+    }
+
     initializeLineClear() {
-        this.listeners.add({event: "placed",
-            args: {game: this},
-            func: function(args) {
+        this.listeners.add("placed",
+            function(args) {
                 var b = args.game.board;
                 var numCleared = 0;
                 var topRow = 0;
@@ -111,10 +127,20 @@ class Tetresse {
                 var l = args.game.listeners;
                 if (numCleared != 0) {
                     d.update({type: "boardContent", display: args.game.display, r1: topRow, r2: botRow}); // finish
+                    args.game.actions.pause();
+                    args.game.piece.gravity.setState(false);
+                    window.setTimeout(function(game) {
+                        game.piece.next();
+                        game.actions.clear();
+                        game.actions.resume();
+                        game.piece.gravity.setState(true);
+                    }, args.game.settings.game.play.LCDelay, args.game);
+                } else {
+                    args.game.piece.next();
                 }
-                l.execute({type: numCleared + "-linesCleared"});
-            }
-        });
+                l.execute(numCleared + "-linesCleared");
+                
+            }, {game: this});
     }
 
     initializeBinds() {
@@ -324,7 +350,8 @@ class Tetresse {
                 while (this.buffer.length != 0 && !this.paused) {
                     var v = this.buffer.splice(0, 1)[0];
                     v = this.table.index[v.i];
-                    v.func(v.args);
+                    if (v.func(v.args))
+                        this.game.listeners.execute("action", v.i);
                 }
                 this.running = false;
             },
@@ -334,18 +361,14 @@ class Tetresse {
 
     /**
      * Creates the listeners object for this game. All methods must be called from listeners scope (eg. listeners.add({...}))
-     * add(args): adds events and or functions
-     *   args:
-     *     {event, (func), (args), (awake)}
-     *         adds event if new and adds func to event
-     *     - event: event label, used to call when executed
-     *     - func: function to run when event executes
-     *     - args: arguments for the function
-     *     - awake: true by default, only matters when adding a new event
+     * add(event, (func), (args), (awake)): adds events and or functions
+     *   event: event label, used to call when executed
+     *   func: function to run when event executes
+     *   args: arguments for the function
+     *   awake: true by default, only matters when adding a new event
      *   returns: hash of function and args used to identify, or null if func was not added
-     * execute(args): executes an event
-     *   args: 
-     *     {event}: executes all functions linked with this event
+     * execute(event, args): executes an event
+     *   event: executes all functions linked with this event
      * pause(args): listeners or specific event
      *   args:
      *     {event}: pauses specific event
@@ -372,7 +395,7 @@ class Tetresse {
                 count: 0, // number of ticks that have passed
                 running: false,
                 func: function(game) { // this game's listeners 
-                    game.listeners.execute({event: "tick"});
+                    game.listeners.execute("tick");
                     game.listeners.clock.count++;
                     var v = game.listeners.clock;
                     window.setTimeout(v.func, v.tick, game);
@@ -392,24 +415,24 @@ class Tetresse {
                     this.count = 0;
                 }
             },
-            add(args) { // args: {event, func, args, awake}
-                if (args == null || args.event == null) return; // TODO reportError
-                args.awake = args.awake == null ? true : args.awake;
-                if (this.events[args.event] == null) // add new event
-                    this.events[args.event] = {awake: args.awake, funcs: {}};
-                if (args.func != null) { // add func
-                    this.funcs[++this.funcs.i] = {func: args.func, args: args.args, events: {[args.event]: args.event}}
-                    this.events[args.event].funcs[this.funcs.i] = this.funcs.i;
+            add(event, func, args, awake) { // args: {event, func, args, awake}
+                if (event == null) return; // TODO reportError
+                awake = awake == null ? true : awake;
+                if (this.events[event] == null) // add new event
+                    this.events[event] = {awake: awake, funcs: {}};
+                if (func != null) { // add func
+                    this.funcs[++this.funcs.i] = {func: func, args: args, events: {[event]: event}}
+                    this.events[event].funcs[this.funcs.i] = this.funcs.i;
                     return this.funcs.i;
                 }
                 return null;
             },
-            execute(args) { // args: {event}
-                if (args == null || args.event == null) return; // TODO reportError
-                if (this.events[args.event] == null) return; // TODO reportError
-                if (!this.events[args.event].awake) return;
-                for (var v in this.events[args.event].funcs)
-                    this.funcs[v].func(this.funcs[v].args);
+            execute(event, args) { // args: {event, [args]} TODO add args to documentation, passes value through to func from caller of execute
+                if (event == null) return; // TODO reportError
+                if (this.events[event] == null) return; // TODO reportError
+                if (!this.events[event].awake) return;
+                for (var v in this.events[event].funcs)
+                    this.funcs[v].func(this.funcs[v].args, args);
             },
             pause(args) { // {event, all}
                 if (args == null) {
@@ -502,137 +525,87 @@ class Tetresse {
                     this.func.timeout = window.setTimeout(this.func.f, this.func.args.time, this.func.args);
                 }
             },
-            move(amount, display, executeListeners) { // positive for right, negative for left. Will move as much as possible. Returns amount piece moved. displays and executes listeners by default
-                executeListeners = executeListeners == null ? true : executeListeners;
-                display = display == null ? true : display;
-                var a = amount / Math.abs(amount);
-                var t = this.get("v");
-                for (var i = 0; i < Math.abs(amount); i++) {
-                    t.loc.c += a;
-                    if (!this.isValid(t)) {t.loc.c -= a; amount = i * a; break;}
-                }
-                // console.log(this.cur.loc.c + ", " + t.loc.c);
-                if (executeListeners) {if (amount != 0) this.game.listeners.execute({event: "premoved"});}
-                this.cur.loc.c = t.loc.c;
-                if (amount != 0) {
+            move(amount) { // positive for right, negative for left. Will move as much as possible. Returns amount piece moved. displays and executes listeners by default
+                var e = this.game.listeners; var t = "move";
+                var a = this.canShift(amount);
+                if (a != 0) e.execute(t);   
+                this.cur.loc.c += a;
+                if (a == 0) {
+                    e.execute(t += "Attempted");
+                    if (amount > 0) e.execute(t + "Right"); else e.execute(t + "Left");
+                } else {
                     this.cur.kick = false;
-                    if (!this.drop(false, false)) this.gravity.reset();
+                    if (this.canDrop(1) == 1) this.gravity.reset();
+                    e.execute(t += "d");
+                    if (amount > 0) e.execute(t += "Right"); else e.execute(t += "Left");
+                    if (a > 1) {e.execute("movedMultiple"); e.execute(t + "Multiple");}
                 }
-                if (executeListeners) {
-                    var e = this.game.listeners; var t = "move"; e.execute(t);
-                    if (amount == 0) {
-                        e.execute({event: t += "Attempted"});
-                        if (a == 1) e.execute({event: t + "Right"}); else e.execute({event: t + "Left"});
-                    } else {
-                        e.execute({event: t += "d"});
-                        if (a == 1) e.execute({event: t += "Right"}); else e.execute({event: t += "Left", });
-                        if (amount > 1) {e.execute({event: "movedMultiple"}); e.execute({event: t + "Multiple"});}
-                    }
-                }
-                return amount;
             },
-            rotate(amount, executeListeners) { // rotates piece by amount then checks (180 rotation will not check validity of rotating 90 degrees)
-                executeListeners = executeListeners == null ? true : executeListeners;
-                var t = this.get("v");
+            rotate(amount) { // rotates piece by amount then checks (180 rotation will not check validity of rotating 90 degrees)
+                var e = this.game.listeners; var t = "rotate"; e.execute(t);
                 var amountCW = (amount + 4) % 4; // number of times cw
-                var rt = this.cur.p == "i" ? "i" : "default";
-                var multiplier = amountCW == 3 ? -1 : 1; // for clockwise
-                var rotNum = amountCW == 1 ? this.cur.rot : (this.cur.rot + 3) % 4; // target rotation state, eg state = 2 and amount = 3, final state is 1
-
-                t.arr = tetresse.utils.rotate(t.arr, amount);
-                t.iLoc = {r: t.loc.r, c: t.loc.c};
-                for (var i = 0; i < tetresse.utils.piece.rotationChart[rt][rotNum].length; i++) {
-                    t.loc.r = t.iLoc.r + (-1) * tetresse.utils.piece.rotationChart[rt][rotNum][i][1] * multiplier;
-                    t.loc.c = t.iLoc.c + tetresse.utils.piece.rotationChart[rt][rotNum][i][0] * multiplier;
-                    if (this.isValid(t)) {
-                        var e;
-                        if (executeListeners) e = this.game.listeners;
-                        if (executeListeners) {
-                            var m = "prerotated";
-                            e.execute({event: m});
-                        }
-                        this.cur.loc = t.loc; this.cur.arr = t.arr; this.cur.rot = (this.cur.rot + amountCW) % 4;
-                        this.cur.kick = i != 0;
-                        if (!this.drop(false, false)) this.gravity.reset();
-                        if (executeListeners) {
-                            var t = "rotated";
-                            e.execute({event: t});
-                            e.execute({event: t + (amountCW == 1 ? "CW" : amountCW == 3 ? "CCW" : "180")});
-                            if (this.cur.kick) {
-                                e.execute({event: "kick"});
-                                e.execute({event: "kicked-" + this.cur.p})
-                            } else
-                                e.execute({event: "notKicked"});
-                        }
-                        return true;
-                    }
+                var a = this.canRotate(amount);
+                if (a == null) {
+                    e.execute(t + "Attempted");
+                    e.execute(t + "Attempted" + (amountCW == 1 ? "CW" : amountCW == 3 ? "CCW" : "180"));
+                    return;
                 }
-                if (executeListeners) {
-                    var t = "rotateAttempted"; var e = this.game.listeners;
-                    e.execute({event: t});
-                    e.execute({event: t + (amountCW == 1 ? "CW" : amountCW == 3 ? "CCW" : "180")});
-                }
-                return false;
+                this.cur.kick = this.cur.loc.r != a.loc.r || this.cur.loc.c != a.loc.c;
+                this.cur.loc = a.loc; this.cur.arr = a.arr; this.cur.rot = (this.cur.rot + amountCW) % 4;
+                if (this.canDrop(1) == 1) this.gravity.reset();
+                e.execute(t += "d");
+                e.execute(t + (amountCW == 1 ? "CW" : amountCW == 3 ? "CCW" : "180"));
+                if (this.cur.kick) {
+                    e.execute("kicked");
+                    e.execute("kicked-" + this.cur.p)
+                } else
+                    e.execute("notKicked");
+                return;
             },
-            drop(executeListeners, drop) { // (soft) drops down one space
-                drop = drop == null ? true : drop;
-                executeListeners = executeListeners == null ? true && drop : executeListeners;
-                var t = this.get("v");
-                t.loc.r++;
-                if (!this.isValid(t)) return false;
-                if (!drop) return true;
-                if (executeListeners)
-                    this.game.listeners.execute({event: "softdrop"});
-                this.cur.loc.r++;
-                if (executeListeners) this.gravity.reset(true);
-                if (executeListeners)
-                    this.game.listeners.execute({event: "softdropped"});
+            drop() { // (soft) drops down one space
+                var d = this.canDrop(1);
+                if (d == 1) this.game.listeners.execute("drop");
+                if (d) this.cur.loc.r++;
+                else {this.game.listeners.execute("dropAttempted"); return false;}
+                this.gravity.reset(true);
+                this.game.listeners.execute("dropped");
                 return true;
             },
-            hardDrop(executeListeners, drop) {
-                drop = drop == null ? true : drop;
-                executeListeners = executeListeners == null ? true : executeListeners;
-                if (executeListeners) this.game.listeners.execute({event: "harddrop"});
-                var prev = this.cur.loc.r;
-                while(this.drop(false)) {}
-                if (!drop)  {
-                    var v = this.cur.loc.r - prev;
-                    this.cur.loc.r = prev;
-                    return v;
-                }
+            hardDrop() {
+                this.game.listeners.execute("harddrop");
+                var amount = this.canDrop();
+                this.cur.loc.r += amount;
                 this.place();
-                if (executeListeners) this.game.listeners.execute({event: "harddropped"});
+                this.game.listeners.execute("harddropped");
             },
-            place(executeListeners) { // place the piece on the board (does not drop)
-                executeListeners = executeListeners == null ? true : executeListeners;
-                if (executeListeners)
-                    this.game.listeners.execute({event: "place"});
+            place() { // place the piece on the board (does not drop)
+                this.game.listeners.execute("place");
+                var updatedArr = [];
                 for (var r = 0; r < this.cur.arr.length; r++)
                     for (var c = 0; c < this.cur.arr[0].length; c++) {
                         var br = this.cur.loc.r;
                         var bc = this.cur.loc.c;
                         var mr = this.game.board.length;
                         var mc = this.game.board[0].length;
-                        if (this.cur.arr[r][c] != 0)
+                        if (this.cur.arr[r][c] != 0) {
                             this.game.board[r + br][c + bc].content = this.cur.p;
+                            updatedArr.push({r: r + br, c: c + bc, content: this.cur.p});
+                        }
                     }
-                if (executeListeners) {
-                    var l = this.game.listeners;
-                    l.execute({event: "placed"});
-                    if (!this.canMove()) {
-                        l.execute({event: "spin"});
-                        l.execute({event: this.cur.p + "-spin"});
-                    }
-                }
                 this.held.used = false;
-                this.next();
+                var l = this.game.listeners;
+                l.execute("placed", updatedArr);
+                if (!this.canMove()) {
+                    l.execute("spin");
+                    l.execute(this.cur.p + "-spin");
+                }
             },
-            next(cur, executeListeners) { // cur: null (pulls from top of next array), {p} generates loc and rot, {p, loc, rot}
-                executeListeners = executeListeners == null ? true : executeListeners;
+            next(cur) { // cur: null (pulls from top of next array), {p} generates loc and rot, {p, loc, rot}
                 // add to next if there are not enough pieces TODO add setting to take in stream?
                 if (this.upNext.length < 7) {
                     var bag = tetresse.utils.shuffle(["i", "j", "l", "o", "s", "t", "z"]);
                     this.upNext.push.apply(this.upNext, bag);    
+                    this.game.listeners.execute("updatedBag", this.cur.p);
                 }
                 var generatedNext = cur == null;
                 if (cur == null) // TODO reportError when piece isn't valid?
@@ -652,37 +625,44 @@ class Tetresse {
                 this.cur.gravity = 0;
                 this.gravity.reset(true);
                 tetresse.utils.rotate(this.cur.arr, this.cur.rot);
-                if (executeListeners) {
-                    this.game.listeners.execute({event: "spawned"});
-                    if (generatedNext)
-                        this.game.listeners.execute({event: "next"});
-                }
+                this.game.listeners.execute("spawned", this.cur.p);
+                if (generatedNext)
+                    this.game.listeners.execute("next");
             },
             get(type) { // type: null (returns copy of {cur, loc, rot}), "v" (returns {loc, arr})
                 if (type == null) return {p: this.cur.p, loc: {r: this.cur.loc.r, c: this.cur.loc.c}, rot: this.cur.rot};
                 if (type === "v") return {loc: {r: this.cur.loc.r, c: this.cur.loc.c}, arr: this.cur.arr};
             },
-            canMove() { // checks if this piece can be moved left, right, up, or down and returns boolean
-                // test up
+            canMove(deltaR, deltaC) { // checks validity of r + deltaR (positive is down) and c + deltaC (positive is right)
+                if (deltaR == null) deltaR = 0;
+                if (deltaC == null) deltaC = 0;
+                if (deltaR == 0 && deltaC == 0)
+                    return this.canMove(1) || this.canMove(-1) || this.canMove(0, 1) || this.canMove(0, -1);
+                
                 var test = this.get("v");
-                test.loc.r++;
-                if (this.isValid(test)) return false;
-                test.loc.r -= 2;
-                if (this.isValid(test)) return false;
-                test.loc.r++;
-                test.loc.c++;
-                if (this.isValid(test)) return false;
-                test.loc.c -= 2;
-                if (this.isValid(test)) return false;
-                return true;
+                test.loc.r += deltaR; // TODO test these out individually using other methods (canShift and canDrop)
+                test.loc.c += deltaC;
+                return this.isValid(test);
+            },
+            canShift(amount) { // left (negative) or right (positive), returns amount able to be moved (<= amount specified)
+                if (amount == null) return; // TODO reportError (or add functionality)
+                var a = amount / Math.abs(amount);
+                var t = this.get("v");
+                var i = 0;
+                while (i < Math.abs(amount)) {
+                    t.loc.c += a;
+                    if (!this.isValid(t)) break;
+                    i++;
+                }
+                return i * a;
             },
             hold() {
                 var l = this.game.listeners;
                 if (this.held.used) { 
-                    l.execute({event: "attemptedHold"});
+                    l.execute("attemptedHold");
                     return;
                 }
-                l.execute({event: "hold"});
+                l.execute("hold");
                 if (this.held.p == null) {
                     this.held.p = this.cur.p;
                     this.next();
@@ -692,7 +672,7 @@ class Tetresse {
                     this.held.p = temp;
                 }
                 this.held.used = true;
-                l.execute({event: "held"});
+                l.execute("held");
             },
             isValid(piece) { // piece: {loc, arr}, null (checks current piece)
                 if (piece == null) piece = {loc: this.cur.loc, arr: this.cur.arr};
@@ -709,14 +689,41 @@ class Tetresse {
                     }
                 }
                 return true;
+            },
+            canRotate(amount) { // whether it can rotate the amount (positive is cw), 0 is can't rotate. returns {arr, loc{x, y}} or null if impossible
+                var t = this.get("v");
+                var amountCW = (amount + 4) % 4; // number of times cw
+                var rt = this.cur.p == "i" ? "i" : "default";
+                var multiplier = amountCW == 3 ? -1 : 1; // for clockwise
+                var rotNum = amountCW == 1 ? this.cur.rot : (this.cur.rot + 3) % 4; // target rotation state, eg state = 2 and amount = 3, final state is 1
+
+                t.arr = tetresse.utils.rotate(t.arr, amount);
+                t.iLoc = {r: t.loc.r, c: t.loc.c};
+                var possible = false;
+                for (var i = 0; i < tetresse.utils.piece.rotationChart[rt][rotNum].length; i++) {
+                    t.loc.r = t.iLoc.r + (-1) * tetresse.utils.piece.rotationChart[rt][rotNum][i][1] * multiplier;
+                    t.loc.c = t.iLoc.c + tetresse.utils.piece.rotationChart[rt][rotNum][i][0] * multiplier;
+                    if (this.isValid(t)) return {arr: t.arr, loc: {r: t.loc.r, c: t.loc.c}};
+                }
+                return null;
+            },
+            canDrop(amount) { // checks if piece can be dropped that amount, or null to count max. Returns amount successfully dropped
+                var t = this.get("v");
+                var i = 0;
+                while (amount == null || i < amount) {
+                    t.loc.r++;
+                    if (!this.isValid(t)) break;
+                    i++;
+                }
+                return i;
             }
         };
-        this.listeners.add({event: "startGame", args: {game: this},
-            func: function(args) {
+        this.listeners.add("startGame",
+            function(args) {
                 if (!args.game.settings.replay)
                     args.game.piece.next();
                 args.game.piece.gravity.setState(args.game.settings.game.play.gravity.enabled);
-            }});
+            }, {game: this});
         return piece;
     }
 
@@ -736,26 +743,26 @@ class Tetresse {
      */
     initializeDisplay() {
         // move
-        this.listeners.add({event: "premoved", func: this.display.update, args: {type: "boardPiece", show: false, display: this.display}});
-        this.listeners.add({event: "moved", func: this.display.update, args: {type: "boardPiece", display: this.display}});
+        this.listeners.add("move", this.display.update, {type: "boardPiece", show: false, display: this.display});
+        this.listeners.add("moved", this.display.update, {type: "boardPiece", display: this.display});
         // rotate
-        this.listeners.add({event: "prerotated", func: this.display.update, args: {type: "boardPiece", show: false, display: this.display}});
-        this.listeners.add({event: "rotated", func: this.display.update, args: {type: "boardPiece", display: this.display}});
+        this.listeners.add("rotate", this.display.update, {type: "boardPiece", show: false, display: this.display});
+        this.listeners.add("rotated", this.display.update, {type: "boardPiece", display: this.display});
         // sd
-        this.listeners.add({event: "softdrop", func: this.display.update, args: {type: "boardPiece", show: false, display: this.display}});
-        this.listeners.add({event: "softdropped", func: this.display.update, args: {type: "boardPiece", display: this.display}});
+        this.listeners.add("drop", this.display.update, {type: "boardPiece", show: false, display: this.display});
+        this.listeners.add("dropped", this.display.update, {type: "boardPiece", display: this.display});
         // hd
-        this.listeners.add({event: "harddrop", func: this.display.update, args: {type: "boardPiece", show: false, display: this.display}});
-        this.listeners.add({event: "place", func: this.display.update, args: {type: "boardPiece", display: this.display}});
+        this.listeners.add("harddrop", this.display.update, {type: "boardPiece", show: false, display: this.display});
+        this.listeners.add("placed", this.display.update, {type: "boardPiece", display: this.display});
         if (!this.settings.replay) {
             // hold
-            this.listeners.add({event: "hold", func: this.display.update, args: {type: "boardPiece", show: false, display: this.display}});
-            this.listeners.add({event: "held", func: this.display.update, args: {type: "holdPiece", display: this.display}});
+            this.listeners.add("hold", this.display.update, {type: "boardPiece", show: false, display: this.display});
+            this.listeners.add("held", this.display.update, {type: "holdPiece", display: this.display});
             // up next
-            this.listeners.add({event: "next", func: this.display.update, args: {type: "next", display: this.display, border: false}});
+            this.listeners.add("next", this.display.update, {type: "next", display: this.display, border: false});
         }
         // spawn
-        this.listeners.add({event: "spawned", func: this.display.update, args: {type: "boardPiece", display: this.display}});
+        this.listeners.add("spawned", this.display.update, {type: "boardPiece", display: this.display});
     }
 
     /**
@@ -877,7 +884,7 @@ class Tetresse {
                     args.show = args.show == null ? true : args.show;
                     var p = d.game.piece.cur;
                     args.content = args.show ? "ghost" : null;
-                    var dropRows = d.game.piece.hardDrop(false, false);
+                    var dropRows = d.game.piece.canDrop();
                     for (var r = 0; r < p.arr.length; r++)
                         for (var c = 0; c < p.arr.length; c++)
                             if (p.arr[r][c] != 0) {
@@ -1129,6 +1136,7 @@ class Tetresse {
                     }
                 },
                 listeners: {},
+                modules: {}
             };
     }
 
@@ -1436,3 +1444,5 @@ class Tetresse {
 
     }
 }
+
+Tetresse.envSetup();

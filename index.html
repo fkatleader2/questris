@@ -1,15 +1,17 @@
 <head>
     <title>Tetresse example</title>
     <script src="tetresse.js"></script>
+    <!-- <script src="modules/tetresse-socket.js"></script> -->
+    <!-- <script src="/socket.io/socket.io.js"></script> -->
+    <script src="modules/incoming-lines.js"></script>
     <script>
         function setup() {
-            new Tetresse({replay: false, x: .005, y: .05, w: .4, h: .9});
-            new Tetresse({replay: true, x: .4, y: .05, w: .5, h: .4});
-            new Tetresse({replay: true, x: .6, y: .05, w: .5, h: .4});
-            new Tetresse({replay: true, x: .8, y: .05, w: .5, h: .4});
-            new Tetresse({replay: true, x: .5, y: .55, w: .4, h: .4});
-            new Tetresse({replay: true, x: .7, y: .55, w: .4, h: .4});
-            // new Tetresse({});
+            new Tetresse({replay: false, x: .005, y: .05, w: .4, h: .9, modules: []});
+            new Tetresse({replay: true, x: .4, y: .05, w: .5, h: .4, modules: ['tetresse-socket']});
+            new Tetresse({replay: true, x: .6, y: .05, w: .5, h: .4, modules: ['tetresse-socket']});
+            new Tetresse({replay: true, x: .8, y: .05, w: .5, h: .4, modules: ['tetresse-socket']});
+            new Tetresse({replay: true, x: .5, y: .55, w: .4, h: .4, modules: ['tetresse-socket']});
+            new Tetresse({replay: true, x: .7, y: .55, w: .4, h: .4, modules: ['tetresse-socket']});
         }
     </script> 
 </head>
